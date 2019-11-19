@@ -103,21 +103,30 @@ func lang(dir string) {
 }
 
 func news(dir string) {
+	// en 18123	rus 16248 "news"
+	// en 12509 rus 13711 "news/"
 	rus := make([]string, 0, 0)
 	pudge.Get("db/lang", "rus", &rus)
 	domains := make(map[string]int, 0)
+	news := make([]string, 0)
 	for _, f := range rus {
-		title, desc, url, _, _, _ := info(f)
+		title, _, url, _, _, _ := info(f)
+		if strings.Contains(url, "news/") {
+			news = append(news, url)
+		}
 		d, _ := domain(url)
 		domains[d] = domains[d] + 1
 		if d == "btvnovinite.bg" {
 			_ = title
-			println(f, title, desc)
+			//println(f, title, desc)
 		}
 	}
 	for dom, cnt := range domains {
 		println(dom, cnt)
 		break
+	}
+	for i, u := range news {
+		println(i, u)
 	}
 	//news-r.ru 944
 	//runews24.ru 572
@@ -271,3 +280,7 @@ func words(text string) {
 		}
 	}*/
 }
+
+//tf Если документ содержит 100 слов, и слово[3] «заяц» встречается в нём 3 раза, то частота слова (TF) для слова «заяц» в документе будет 0,03 (3/100).
+//idf Таким образом, если «заяц» содержится в 1000 документах из 10 000 000 документов, то IDF будет равной: log(10 000 000/1000) = 4.
+//TF-IDF вес для слова «заяц» в выбранном документе будет равен: 0,03 × 4 = 0,12
