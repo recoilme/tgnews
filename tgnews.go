@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -14,10 +15,12 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/abadojack/whatlanggo"
+	. "github.com/go-nlp/dmmclust"
 	"github.com/jbrukh/bayesian"
 	"github.com/recoilme/pudge"
 	"github.com/wilcosheh/tfidf"
 	"github.com/wilcosheh/tfidf/similarity"
+	"github.com/xtgo/set"
 )
 
 const (
@@ -27,14 +30,52 @@ const (
 	NotNews bayesian.Class = "NotNews"
 )
 
+var data = []string{
+	// coffee related tweet
+	"A Java prefix that I don't hate .",
+	"Colleagues must have thought I was crazy on Friday, but @MeccaCoffee ' s latest Xade Burqa is nothing short of orgasm inducing .",
+
+	// JavaScript hate
+	"Let me take this time while I wait for your JavaScript to download to tell you to stop using so much JavaScript on your web page .",
+
+	// On Error Resume Next
+	"all future programming languages I implement will have On Error Resume Next . Even if it's a functional , expressions-only language . Because I can. ",
+	"On Error Resume Next",
+	"When I was younger , I used VB. My crutch was On Error Resume Next . I find it weird reimplementing it for a probabilistic parser .",
+
+	// Gophers/Golang
+	"Questions for #gopher and #golang people out there : how do you debug a slow compile ? ",
+	"In case you missed it , 10000 words on generics in #golang :",
+	"Data Science in Go https://speakerdeck.com/chewxy/data-science-in-go … Slides by @chewxy #gopher #golang",
+	"Big heap , many pointers . GC killing me . Help ? Tips? #golang . Most pointers unavoidable .",
+}
+
 type ByLang struct {
 	LangCode string   `json:"lang_code"`
 	Articles []string `json:"articles"`
 }
+type ByNews struct {
+	Articles []string `json:"articles"`
+}
 
-type ByCategory []struct {
+type ByCategory struct {
 	Category string   `json:"category"`
 	Articles []string `json:"articles"`
+}
+
+type Article struct {
+	File     string `json:"file"`
+	Name     string `json:",string"`
+	LangCode string `json:"lang_code"`
+	Title    string
+	Desc     string
+	Href     string
+	Domain   string
+	SName    string
+	Text     string
+	IsNews   bool
+	About    string
+	TFIDF    map[string]float64
 }
 
 //category – "society", "economy", "technology", "sports", "entertainment", "science" или "other"
@@ -48,8 +89,8 @@ type ByCategory []struct {
 
 //go run tgnews.go languages data/DataClusteringSample0107/20191101/00/
 func main() {
-	println()
-	println("-- tgnews --")
+	//println()
+	//println("-- tgnews --")
 	args := os.Args
 	cmd := "languages"
 	dir := "data"
@@ -59,7 +100,7 @@ func main() {
 	if len(args) >= 3 {
 		dir = args[2]
 	}
-	println("cmd:", cmd, "dir:", dir)
+	//println("cmd:", cmd, "dir:", dir)
 	t1 := time.Now()
 	switch cmd {
 	default:
@@ -71,7 +112,8 @@ func main() {
 	}
 	t2 := time.Now()
 	dur := t2.Sub(t1)
-	fmt.Printf("The %s took %v to run.  \n", cmd, dur)
+	_ = dur
+	//fmt.Printf("The %s took %v to run.  \n", cmd, dur)
 }
 
 func test3(d string) {
@@ -121,14 +163,47 @@ func test2(d string) {
 	println(scores, likely, st)
 }
 
-func lang(dir string) {
+func AByInfo(in []Article, onlyNews bool) (out []Article) {
+	for _, a := range in {
+		isNews := false
+		title, desc, url, sname, text, err := info(a.File)
+		if err != nil {
+			//panic(err)
+			continue
+		}
+		if strings.Contains(url, "news/") {
+			isNews = true
+		}
+		if strings.Contains(sname, "news") {
+			isNews = true
+		}
+		d, errDom := domain(url)
+		if errDom == nil {
+			a.Domain = d
+		}
+		if strings.Contains(d, "news") {
+			isNews = true
+		}
+		if !isNews && onlyNews {
+			continue
+		}
+		a.Title = title
+		a.Desc = desc
+		a.Href = url
+		a.SName = sname
+		a.Text = text
+		a.IsNews = isNews
+		out = append(out, a)
+	}
+	return out
+}
+func AByLang(dir string) []Article {
 	list, err := filePathWalkDir(dir)
 	if err != nil {
 		panic(err)
 	}
-	println("files:", len(list))
-	eng := make([]string, 0, 0)
-	rus := make([]string, 0, 0)
+	//println("files:", len(list))
+	articles := make([]Article, 0, 0)
 	options := whatlanggo.Options{
 		Whitelist: map[whatlanggo.Lang]bool{
 			whatlanggo.Eng: true,
@@ -141,7 +216,7 @@ func lang(dir string) {
 		//title, desc, _, _, text, err := info(f)
 		title, desc, text, err := header(f)
 		if err != nil || title == "" {
-			println("skiped:", f, title, desc, err)
+			//println("skiped:", f, title, desc, err)
 			continue
 		}
 		//println("file:", f, title, desc, err)
@@ -156,46 +231,200 @@ func lang(dir string) {
 		}
 		switch lang {
 		case "English":
-			eng = append(eng, f)
+			articles = append(articles, Article{Name: filepath.Base(f), File: f, LangCode: "en"})
 		case "Russian":
-			rus = append(rus, f)
+			articles = append(articles, Article{Name: filepath.Base(f), File: f, LangCode: "ru"})
 		default:
 			//println("not detected", lang)
 		}
 		//break
 	}
+	return articles
+}
+
+func lang(dir string) {
+	articles := AByLang(dir)
 	//eng: 36440 rus: 31886
-	println("eng:", len(eng), "rus:", len(rus))
+	//println("eng:", len(eng), "rus:", len(rus))
 
 	langs := make([]ByLang, 2)
 	langs[0].LangCode = "en"
+	eng := make([]string, 0)
+	rus := make([]string, 0)
+	for _, a := range articles {
+		if a.LangCode == "en" {
+			eng = append(eng, a.Name)
+		}
+		if a.LangCode == "ru" {
+			rus = append(rus, a.Name)
+		}
+	}
 	langs[0].Articles = eng
 
 	langs[1].LangCode = "ru"
 	langs[1].Articles = rus
 	json, err := json.MarshalIndent(langs, "", "  ")
-	println(string(json))
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	fmt.Println(string(json))
 	//bylang[0].LangCode = "en"
 
-	err = pudge.DeleteFile("db/lang")
-	if err != nil {
-		println(err.Error())
-	}
-	err = pudge.Set("db/lang", "rus", rus)
-	if err != nil {
-		println(err.Error())
-	}
-	err = pudge.Set("db/lang", "eng", eng)
+	pudge.DeleteFile("db/bylang")
+
+	err = pudge.Set("db/bylang", dir, articles)
 	if err != nil {
 		println(err.Error())
 	}
 }
 
+func APrint(articles []Article) {
+
+	b, err := json.MarshalIndent(articles, "", "  ")
+
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	fmt.Println(string(b))
+	println(len(articles))
+}
+
+func ARu(in []Article) (out []Article) {
+	for _, a := range in {
+		if a.LangCode == "ru" {
+			out = append(out, a)
+		}
+	}
+	return
+}
+
 func news(dir string) {
+	articles := make([]Article, 0, 0)
+	err := pudge.Get("db/bylang", dir, &articles)
+	if err != nil || len(articles) == 0 {
+		articles = AByLang(dir)
+	}
+	articles = AByInfo(articles, true)
+	//APrint(ARu(articles))
+	err = pudge.Set("db/bynews", dir, articles)
+	if err != nil {
+		println(err.Error())
+	}
+	byNews := &ByNews{}
+	for _, a := range articles {
+		byNews.Articles = append(byNews.Articles, a.Name)
+	}
+	b, err := json.MarshalIndent(byNews, "", "  ")
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	_ = b
+	//fmt.Println(string(b))
+
+	//clusters(ARu(articles))
+	tr := traintf(ARu(articles))
+	mapped := make(map[int]uint8)
+	k := 0
+	for i, a := range tr {
+		if _, ok := mapped[i]; ok {
+			continue
+		}
+		mapped[i] = 1
+		max := float64(0)
+		maxj := -1
+		maxart := a
+		for j, b := range tr {
+			if _, ok := mapped[j]; ok {
+				continue
+			}
+			sim := similarity.Cosine(a.TFIDF, b.TFIDF)
+			if sim > max {
+				max = sim
+				maxart = b
+				maxj = j
+			}
+		}
+		if max > float64(0.55) {
+			k++
+			mapped[maxj] = 1
+			println(k, a.Title, a.Domain)
+			println(k, maxart.Title, maxart.Domain)
+			//println("a.About")
+			//println(a.About)
+			//println("maxart.About")
+			//println(maxart.About)
+			fmt.Printf("similarity:%f\n", max)
+			println()
+		}
+		if i > 50 {
+			//break
+		}
+	}
+	//clusters(tr)
+}
+
+func traintf(in []Article) []Article {
+	tf := tfidf.New()
+	for _, a := range in {
+		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
+		tf.AddDocs(words)
+	}
+	for i, a := range in {
+		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
+		w := tf.Cal(words)
+		//	println(a.Title)
+		in[i].About = top(w, 100)
+		in[i].TFIDF = w
+		//println(top(w, 30))
+		//println()
+	}
+
+	return in
+}
+
+func clusters(in []Article) {
+	data := make([]string, 0)
+	for _, a := range in {
+		data = append(data, a.About)
+	}
+	corp := makeCorpus(data)
+	docs := makeDocuments(data, corp, true)
+	r := rand.New(rand.NewSource(1337))
+	conf := Config{
+		K:          10,          // maximum 10 clusters expected
+		Vocabulary: len(corp),   // simple example: the vocab is the same as the corpus size
+		Iter:       1000,        // iterate 100 times
+		Alpha:      0.0001,      // smaller probability of joining an empty group
+		Beta:       0.1,         // higher probability of joining groups like me
+		Score:      Algorithm4,  // use Algorithm3 to score
+		Sampler:    NewGibbs(r), // use Gibbs to sample
+	}
+	var clustered []Cluster
+	var err error
+	if clustered, err = FindClusters(docs, conf); err != nil {
+		fmt.Println(err)
+	}
+	fmt.Println("Clusters (Algorithm4):")
+	for i, clust := range clustered {
+		fmt.Printf("\t%d: %q\n", clust.ID(), data[i])
+	}
+}
+
+func newsTmp(dir string) {
 	// en 18123	rus 16248 "news"
 	// en 12509 rus 13711 "news/"
-	rus := make([]string, 0, 0)
-	pudge.Get("db/lang", "rus", &rus)
+	articles := make([]Article, 0, 0)
+	eng := make([]string, 0)
+	rus := make([]string, 0)
+	for _, a := range articles {
+		if a.LangCode == "en" {
+			eng = append(eng, a.Name)
+		}
+		if a.LangCode == "ru" {
+			rus = append(rus, a.Name)
+		}
+	}
+	pudge.Get("db/bylang", "bylang", &articles)
 	domains := make(map[string]int, 0)
 	news := make([]string, 0)
 	cl := bayesian.NewClassifierTfIdf(News, NotNews)
@@ -363,6 +592,10 @@ func header(file string) (title, desc, text string, err error) {
 func filePathWalkDir(root string) ([]string, error) {
 	var files []string
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			fmt.Println(err.Error())
+			return err
+		}
 		if !info.IsDir() {
 			files = append(files, path)
 		}
@@ -421,7 +654,7 @@ func info(file string) (title, desc, url, name, text string, err error) {
 			url = con
 		}
 		if op == "og:site_name" {
-			name = con
+			name = strings.ToLower(con)
 		}
 	})
 	space := regexp.MustCompile(`\s+`)
@@ -488,8 +721,23 @@ func bigwords(text string) (res []string) {
 		if len([]rune(w)) < 4 {
 			continue
 		}
+		if len([]rune(w)) > 8 {
+			w = string([]rune(w)[:8])
+		} else {
+			if len([]rune(w)) > 6 {
+				w = string([]rune(w)[:6])
+			}
+		}
 		if strings.HasPrefix(w, "<") {
 			continue
+		}
+		if strings.ContainsAny(w, ",«»():") {
+			w = strings.ReplaceAll(w, ":", "")
+			w = strings.ReplaceAll(w, "(", "")
+			w = strings.ReplaceAll(w, ")", "")
+			w = strings.ReplaceAll(w, "«", "")
+			w = strings.ReplaceAll(w, "»", "")
+			w = strings.ReplaceAll(w, ",", "")
 		}
 		res = append(res, strings.ToLower(w))
 	}
@@ -497,7 +745,7 @@ func bigwords(text string) (res []string) {
 }
 
 func top(m map[string]float64, limit int) string {
-	res := ""
+	res := make([]string, 0)
 	n := map[float64][]string{}
 	var a []float64
 	for k, v := range m {
@@ -514,7 +762,7 @@ func top(m map[string]float64, limit int) string {
 		}
 		for _, s := range n[k] {
 			j++
-			res += " " + s
+			res = append(res, s)
 			//fmt.Printf("%d %s, %.20f\n", j, s, k)
 			if j > limit {
 				break
@@ -524,5 +772,71 @@ func top(m map[string]float64, limit int) string {
 			break
 		}
 	}
-	return res
+	return strings.Join(res, " ")
+}
+
+func makeCorpus(a []string) map[string]int {
+	retVal := make(map[string]int)
+	var id int
+	for _, s := range a {
+		for _, f := range strings.Fields(s) {
+			if _, ok := retVal[f]; !ok {
+				retVal[f] = id
+				id++
+			}
+		}
+	}
+	return retVal
+}
+
+func makeDocuments(a []string, c map[string]int, allowRepeat bool) []Document {
+	retVal := make([]Document, 0, len(a))
+	for _, s := range a {
+		var ts []int
+		for _, f := range strings.Fields(s) {
+			id := c[f]
+			ts = append(ts, id)
+		}
+		if !allowRepeat {
+			ts = set.Ints(ts) // this uniquifies the sentence
+		}
+		retVal = append(retVal, TokenSet(ts))
+	}
+	return retVal
+}
+
+func Example() {
+	corp := makeCorpus(data)
+	docs := makeDocuments(data, corp, false)
+	r := rand.New(rand.NewSource(1337))
+	conf := Config{
+		K:          10,          // maximum 10 clusters expected
+		Vocabulary: len(corp),   // simple example: the vocab is the same as the corpus size
+		Iter:       1000,        // iterate 100 times
+		Alpha:      0.0001,      // smaller probability of joining an empty group
+		Beta:       0.1,         // higher probability of joining groups like me
+		Score:      Algorithm3,  // use Algorithm3 to score
+		Sampler:    NewGibbs(r), // use Gibbs to sample
+	}
+	var clustered []Cluster
+	var err error
+	if clustered, err = FindClusters(docs, conf); err != nil {
+		fmt.Println(err)
+	}
+	fmt.Println("Clusters (Algorithm3):")
+	for i, clust := range clustered {
+		fmt.Printf("\t%d: %q\n", clust.ID(), data[i])
+	}
+
+	// Using Algorithm4, where repeat words are allowed
+	docs = makeDocuments(data, corp, true)
+	conf.Score = Algorithm4
+	if clustered, err = FindClusters(docs, conf); err != nil {
+		fmt.Println(err)
+	}
+
+	fmt.Println("\nClusters (Algorithm4):")
+	for i, clust := range clustered {
+		fmt.Printf("\t%d: %q\n", clust.ID(), data[i])
+	}
 }
