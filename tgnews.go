@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"log"
 	"math/rand"
 	"net/url"
 	"os"
@@ -28,6 +30,7 @@ const (
 	Bad     bayesian.Class = "Bad"
 	News    bayesian.Class = "News"
 	NotNews bayesian.Class = "NotNews"
+	isDebug                = true
 )
 
 var data = []string{
@@ -109,11 +112,17 @@ func main() {
 		news(dir)
 	case "test":
 		test3(dir)
+	case "categories":
+		categ(dir)
+	case "class":
+		class(dir)
 	}
 	t2 := time.Now()
 	dur := t2.Sub(t1)
 	_ = dur
-	//fmt.Printf("The %s took %v to run.  \n", cmd, dur)
+	if isDebug {
+		fmt.Printf("The %s took %v to run.  \n", cmd, dur)
+	}
 }
 
 func test3(d string) {
@@ -197,6 +206,7 @@ func AByInfo(in []Article, onlyNews bool) (out []Article) {
 	}
 	return out
 }
+
 func AByLang(dir string) []Article {
 	list, err := filePathWalkDir(dir)
 	if err != nil {
@@ -289,11 +299,36 @@ func APrint(articles []Article) {
 	println(len(articles))
 }
 
+func checkErr(err error) {
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func copy(src string, dst string) {
+	// Read all content of src to data
+	data, err := ioutil.ReadFile(src)
+	checkErr(err)
+	// Write data to dst
+	err = ioutil.WriteFile(dst, data, 0644)
+	checkErr(err)
+}
+
 func ARu(in []Article) (out []Article) {
+	dom := make(map[string]byte)
 	for _, a := range in {
-		if a.LangCode == "ru" {
+		if a.LangCode == "ru" { //&& a.Domain == "car.ru" {
+			dom[a.Domain] = 1
+			//copy(a.File, "clusters_ru/technology/"+a.Name)
 			out = append(out, a)
 		}
+	}
+	//technology computerworld.ru  car.ru appstudio.org
+	//sports vringe.com
+	//klerk.ru
+	for d, _ := range dom {
+		_ = d
+		//println(d)
 	}
 	return
 }
@@ -305,7 +340,7 @@ func news(dir string) {
 		articles = AByLang(dir)
 	}
 	articles = AByInfo(articles, true)
-	//APrint(ARu(articles))
+	APrint(ARu(articles))
 	err = pudge.Set("db/bynews", dir, articles)
 	if err != nil {
 		println(err.Error())
@@ -323,44 +358,47 @@ func news(dir string) {
 
 	//clusters(ARu(articles))
 	tr := traintf(ARu(articles))
-	mapped := make(map[int]uint8)
-	k := 0
-	for i, a := range tr {
-		if _, ok := mapped[i]; ok {
-			continue
-		}
-		mapped[i] = 1
-		max := float64(0)
-		maxj := -1
-		maxart := a
-		for j, b := range tr {
-			if _, ok := mapped[j]; ok {
+	_ = tr
+	/*
+		mapped := make(map[int]uint8)
+		k := 0
+		for i, a := range tr {
+			if _, ok := mapped[i]; ok {
 				continue
 			}
-			sim := similarity.Cosine(a.TFIDF, b.TFIDF)
-			if sim > max {
-				max = sim
-				maxart = b
-				maxj = j
+			mapped[i] = 1
+			max := float64(0)
+			maxj := -1
+			maxart := a
+			for j, b := range tr {
+				if _, ok := mapped[j]; ok {
+					continue
+				}
+				sim := similarity.Cosine(a.TFIDF, b.TFIDF)
+				if sim > max {
+					max = sim
+					maxart = b
+					maxj = j
+				}
+			}
+			if max > float64(1.55) {
+				k++
+				mapped[maxj] = 1
+				println(k, a.Title, a.Domain)
+				println(k, maxart.Title, maxart.Domain)
+				//println("a.About")
+				//println(a.About)
+				//println("maxart.About")
+				//println(maxart.About)
+				fmt.Printf("similarity:%f\n", max)
+				println()
+			}
+			if i > 50 {
+				//break
 			}
 		}
-		if max > float64(0.55) {
-			k++
-			mapped[maxj] = 1
-			println(k, a.Title, a.Domain)
-			println(k, maxart.Title, maxart.Domain)
-			//println("a.About")
-			//println(a.About)
-			//println("maxart.About")
-			//println(maxart.About)
-			fmt.Printf("similarity:%f\n", max)
-			println()
-		}
-		if i > 50 {
-			//break
-		}
-	}
-	//clusters(tr)
+		//clusters(tr)
+	*/
 }
 
 func traintf(in []Article) []Article {
@@ -838,5 +876,121 @@ func Example() {
 	fmt.Println("\nClusters (Algorithm4):")
 	for i, clust := range clustered {
 		fmt.Printf("\t%d: %q\n", clust.ID(), data[i])
+	}
+}
+
+func categ(dir string) {
+	tech := categWords("clusters_ru/technology")
+	sports := categWords("clusters_ru/sports")
+	_ = tech
+	_ = sports
+	articles := make([]Article, 0, 0)
+	err := pudge.Get("db/bynews", dir, &articles)
+	if err != nil || len(articles) == 0 {
+
+		err := pudge.Get("db/bylang", dir, &articles)
+		if err != nil || len(articles) == 0 {
+			articles = AByLang(dir)
+		}
+		articles = AByInfo(articles, true)
+		//articles = AByLang(dir)
+	}
+	//APrint(ARu(articles))
+	articles = ARu(articles)
+	tf := tfidf.New()
+	tf.AddDocs(strings.Join(tech, " "))
+	tf.AddDocs(strings.Join(sports, " "))
+	for _, a := range articles {
+		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
+		tf.AddDocs(words)
+	}
+	techw := tf.Cal(strings.Join(tech, " "))
+	sportsw := tf.Cal(strings.Join(sports, " "))
+	for i, a := range articles {
+		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
+		w := tf.Cal(words)
+		articles[i].About = top(w, 100)
+		articles[i].TFIDF = w
+
+		simtech := similarity.Cosine(w, techw)
+		simsports := similarity.Cosine(w, sportsw)
+		if simtech > simsports {
+			//more tech
+			if simtech > float64(0.555) {
+				fmt.Printf("tech: %s %s %f\n", a.Domain, a.Title, simtech)
+			}
+		} else {
+			//more sports
+			if simsports > float64(0.555) {
+				fmt.Printf("sport: %s %s %f\n", a.Domain, a.Title, simsports)
+			}
+		}
+	}
+	println(len(articles))
+}
+
+func categWords(dir string) []string {
+	articles := make([]Article, 0, 0)
+	articles = AByLang(dir)
+	articles = AByInfo(articles, true)
+	//APrint(ARu(articles))
+	res := make([]string, 0)
+	for _, a := range articles {
+		res = append(res, bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName)...)
+	}
+	return res
+}
+
+func class(dir string) {
+	articles := make([]Article, 0, 0)
+	err := pudge.Get("db/bynews", dir, &articles)
+	if err != nil || len(articles) == 0 {
+
+		err := pudge.Get("db/bylang", dir, &articles)
+		if err != nil || len(articles) == 0 {
+			articles = AByLang(dir)
+		}
+		articles = AByInfo(articles, true)
+		//articles = AByLang(dir)
+	}
+	var input string
+	for i, a := range articles {
+		txt := a.Text
+		if len(txt) > 500 {
+			txt = txt[:500]
+		}
+		v := &Article{File: a.File, LangCode: a.LangCode, Desc: a.Desc, Domain: a.Domain, Text: txt, Href: a.Href}
+		b, err := json.MarshalIndent(v, "", "  ")
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+
+		println(string(b))
+		println()
+		fmt.Print(i, ": Enter text: \n")
+		println(`
+// 0. Stop
+// 1. Society (включает Politics, Elections, Legislation, Incidents, Crime)
+// 2. Economy (включает Markets, Finance, Business)
+// 3. Technology (включает Gadgets, Auto, Apps, Internet services)
+// 4. Sports (включает E-Sports)
+// 5. Entertainment (включает Movies, Music, Games, Books, Arts)
+// 6. Science (включает Health, Biology, Physics, Genetics)
+// 7. Other (новостные статьи, не попавшие в перечисленные выше категории)
+// 8. Not news
+// 
+`)
+		fmt.Scanln(&input)
+		fmt.Print(input)
+		switch input {
+		case "0":
+			break
+		case "1":
+			s := fmt.Sprintf("train/%s/%s/%s", a.LangCode, input, a.Name)
+			copy(a.File, s)
+		}
+		if input == "0" {
+			break
+		}
 	}
 }
