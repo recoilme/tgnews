@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	"math/rand"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -17,20 +16,18 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/abadojack/whatlanggo"
-	. "github.com/go-nlp/dmmclust"
-	"github.com/jbrukh/bayesian"
 	"github.com/recoilme/pudge"
 	"github.com/wilcosheh/tfidf"
 	"github.com/wilcosheh/tfidf/similarity"
-	"github.com/xtgo/set"
 )
 
 const (
-	Good    bayesian.Class = "Good"
-	Bad     bayesian.Class = "Bad"
-	News    bayesian.Class = "News"
-	NotNews bayesian.Class = "NotNews"
-	isDebug                = true
+	/*
+		Good    bayesian.Class = "Good"
+		Bad     bayesian.Class = "Bad"
+		News    bayesian.Class = "News"
+		NotNews bayesian.Class = "NotNews"*/
+	isDebug = true
 )
 
 var data = []string{
@@ -140,6 +137,7 @@ func test3(d string) {
 	fmt.Printf("weight of is %+v.\n", w1)
 }
 
+/*
 func test2(d string) {
 	f := tfidf.New()
 	f.AddDocs("how are you", "are you fine", "how old are you", "are you ok", "i am ok", "i am file")
@@ -170,7 +168,7 @@ func test2(d string) {
 		[]string{"ugly", "girl"})
 
 	println(scores, likely, st)
-}
+}*/
 
 func AByInfo(in []Article, onlyNews bool) (out []Article) {
 	for _, a := range in {
@@ -420,6 +418,7 @@ func traintf(in []Article) []Article {
 	return in
 }
 
+/*
 func clusters(in []Article) {
 	data := make([]string, 0)
 	for _, a := range in {
@@ -447,7 +446,8 @@ func clusters(in []Article) {
 		fmt.Printf("\t%d: %q\n", clust.ID(), data[i])
 	}
 }
-
+*/
+/*
 func newsTmp(dir string) {
 	// en 18123	rus 16248 "news"
 	// en 12509 rus 13711 "news/"
@@ -569,7 +569,7 @@ func newsTmp(dir string) {
 	//dvnovosti.ru 200
 	//riasar.ru
 	//tengrinews.kz 421
-}
+}*/
 
 func printmap(m map[string]float64) {
 	n := map[float64][]string{}
@@ -827,6 +827,7 @@ func makeCorpus(a []string) map[string]int {
 	return retVal
 }
 
+/*
 func makeDocuments(a []string, c map[string]int, allowRepeat bool) []Document {
 	retVal := make([]Document, 0, len(a))
 	for _, s := range a {
@@ -877,7 +878,7 @@ func Example() {
 	for i, clust := range clustered {
 		fmt.Printf("\t%d: %q\n", clust.ID(), data[i])
 	}
-}
+}*/
 
 func categ(dir string) {
 	tech := categWords("clusters_ru/technology")
@@ -954,6 +955,7 @@ func class(dir string) {
 		//articles = AByLang(dir)
 	}
 	var input string
+	all := len(articles)
 	for i, a := range articles {
 		txt := a.Text
 		if len(txt) > 500 {
@@ -967,7 +969,7 @@ func class(dir string) {
 
 		println(string(b))
 		println()
-		fmt.Print(i, ": Enter text: \n")
+		fmt.Print(i, all, ": Enter text: \n")
 		println(`
 // 0. Stop
 // 1. Society (включает Politics, Elections, Legislation, Incidents, Crime)
@@ -978,19 +980,17 @@ func class(dir string) {
 // 6. Science (включает Health, Biology, Physics, Genetics)
 // 7. Other (новостные статьи, не попавшие в перечисленные выше категории)
 // 8. Not news
-// 
+// 9. Skip
 `)
 		fmt.Scanln(&input)
 		fmt.Print(input)
-		switch input {
-		case "0":
-			break
-		case "1":
-			s := fmt.Sprintf("train/%s/%s/%s", a.LangCode, input, a.Name)
-			copy(a.File, s)
-		}
 		if input == "0" {
 			break
 		}
+		if input == "9" {
+			continue
+		}
+		s := fmt.Sprintf("train/%s/%s/%s", a.LangCode, input, a.Name)
+		copy(a.File, s)
 	}
 }
