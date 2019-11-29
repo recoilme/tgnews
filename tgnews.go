@@ -44,6 +44,11 @@ type ByCategory struct {
 	Articles []string `json:"articles"`
 }
 
+type ByThread struct {
+	Title    string   `json:"title"`
+	Articles []string `json:"articles"`
+}
+
 type Article struct {
 	File       string `json:"file"`
 	Name       string `json:",string"`
@@ -1230,30 +1235,77 @@ func threads(dir string) {
 		articles = categories(dir, false)
 	}
 
-	ru0 := make([]Article, 0, 0)
+	chunks := make(map[string][]Article)
 	for _, a := range articles {
-		if a.LangCode == "ru" && a.CategoryId == 0 {
-			ru0 = append(ru0, a)
+		key := fmt.Sprintf("%s%d", a.LangCode, a.CategoryId)
+		if _, ok := chunks[key]; !ok {
+			chunks[key] = make([]Article, 0)
 		}
+		chunks[key] = append(chunks[key], a)
 	}
 
+	allpairs := make([][]Article, 0)
+	for _, val := range chunks {
+		arr := pairs(val)
+		for _, p := range arr {
+			allpairs = append(allpairs, p)
+		}
+	}
 	//fmt.Println(string(b))
-	println("allo")
-	t1 := time.Now()
-	trained := traintf(ru0)
-	t2 := time.Now()
-	fmt.Printf("%v", t2.Sub(t1))
+	byThreads := make([]ByThread, 0)
+	for _, p := range allpairs {
+		byThread := ByThread{}
+		byThread.Articles = make([]string, 0)
+		if len(p) > 0 {
+			byThread.Title = p[0].Title
+		}
+		for _, it := range p {
+			byThread.Articles = append(byThread.Articles, it.Name)
+		}
+		byThreads = append(byThreads, byThread)
+	}
+	b, err := json.MarshalIndent(byThreads, "", "  ")
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	fmt.Println(string(b))
+	//fmt.Printf("pairs:%+v\n", allpairs)
+	//APrint(tra)
+}
+
+func pairs(in []Article) (allpairs [][]Article) {
+
+	trained := traintf(in)
+	tres := float64(0.777)
 	var cur Article
+	skiplist := make(map[int]bool)
 	for i := 0; i < len(trained); i++ {
-		if i == 0 {
-			println(trained[0].Title)
-			cur = trained[0]
+		cur = trained[i]
+		if _, ok := skiplist[i]; ok {
 			continue
 		}
-		sim := Cosine(cur.TFIDF, trained[i].TFIDF)
-		fmt.Printf("sim:%0.5f Tit:%s\n", sim, trained[i].Title)
+		pairs := make([]Article, 0)
+		for j := 0; j < len(trained); j++ {
+			if i == j {
+				continue
+			}
+			if _, ok := skiplist[j]; ok {
+				continue
+			}
+			sim := Cosine(cur.TFIDF, trained[j].TFIDF)
+			if sim > tres {
+				if len(pairs) == 0 {
+					pairs = append(pairs, cur)
+					skiplist[i] = true
+				}
+				pairs = append(pairs, trained[j])
+				skiplist[j] = true
+			}
+		}
+		if len(pairs) > 0 {
+			allpairs = append(allpairs, pairs)
+		}
 	}
-	t3 := time.Now()
-	fmt.Printf("%v", t3.Sub(t2))
-	//APrint(tra)
+	return
 }
