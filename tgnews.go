@@ -6,19 +6,20 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/abadojack/whatlanggo"
 	"github.com/recoilme/pudge"
 	"github.com/wilcosheh/tfidf"
-	"github.com/wilcosheh/tfidf/similarity"
 )
 
 const (
@@ -29,26 +30,6 @@ const (
 		NotNews bayesian.Class = "NotNews"*/
 	isDebug = true
 )
-
-var data = []string{
-	// coffee related tweet
-	"A Java prefix that I don't hate .",
-	"Colleagues must have thought I was crazy on Friday, but @MeccaCoffee ' s latest Xade Burqa is nothing short of orgasm inducing .",
-
-	// JavaScript hate
-	"Let me take this time while I wait for your JavaScript to download to tell you to stop using so much JavaScript on your web page .",
-
-	// On Error Resume Next
-	"all future programming languages I implement will have On Error Resume Next . Even if it's a functional , expressions-only language . Because I can. ",
-	"On Error Resume Next",
-	"When I was younger , I used VB. My crutch was On Error Resume Next . I find it weird reimplementing it for a probabilistic parser .",
-
-	// Gophers/Golang
-	"Questions for #gopher and #golang people out there : how do you debug a slow compile ? ",
-	"In case you missed it , 10000 words on generics in #golang :",
-	"Data Science in Go https://speakerdeck.com/chewxy/data-science-in-go … Slides by @chewxy #gopher #golang",
-	"Big heap , many pointers . GC killing me . Help ? Tips? #golang . Most pointers unavoidable .",
-}
 
 type ByLang struct {
 	LangCode string   `json:"lang_code"`
@@ -64,18 +45,27 @@ type ByCategory struct {
 }
 
 type Article struct {
-	File     string `json:"file"`
-	Name     string `json:",string"`
-	LangCode string `json:"lang_code"`
-	Title    string
-	Desc     string
-	Href     string
-	Domain   string
-	SName    string
-	Text     string
-	IsNews   bool
-	About    string
-	TFIDF    map[string]float64
+	File       string `json:"file"`
+	Name       string `json:",string"`
+	LangCode   string `json:"lang_code"`
+	Title      string
+	Desc       string
+	Href       string
+	Domain     string
+	SName      string
+	Text       string
+	IsNews     bool
+	About      string
+	TFIDF      map[string]float64
+	CategoryId int
+}
+
+type Category struct {
+	ID       int
+	Name     string
+	LangCode string
+	Words    []string
+	Weights  map[string]float64
 }
 
 //category – "society", "economy", "technology", "sports", "entertainment", "science" или "other"
@@ -110,7 +100,9 @@ func main() {
 	case "test":
 		test3(dir)
 	case "categories":
-		categ(dir)
+		categories(dir, true)
+	case "threads":
+		threads(dir)
 	case "class":
 		class(dir)
 	}
@@ -879,7 +871,7 @@ func Example() {
 		fmt.Printf("\t%d: %q\n", clust.ID(), data[i])
 	}
 }*/
-
+/*
 func categ(dir string) {
 	tech := categWords("clusters_ru/technology")
 	sports := categWords("clusters_ru/sports")
@@ -928,7 +920,7 @@ func categ(dir string) {
 		}
 	}
 	println(len(articles))
-}
+}*/
 
 func categWords(dir string) []string {
 	articles := make([]Article, 0, 0)
@@ -951,46 +943,317 @@ func class(dir string) {
 		if err != nil || len(articles) == 0 {
 			articles = AByLang(dir)
 		}
-		articles = AByInfo(articles, true)
+		articles = AByInfo(articles, false)
 		//articles = AByLang(dir)
 	}
+
+	//cosine
+	tf := tfidf.New()
+	for _, a := range articles {
+		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
+		tf.AddDocs(words)
+	}
+	categs := make([]Category, 0)
+	langs := []string{"en", "ru"}
+	for _, l := range langs {
+		for i := 1; i < 8; i++ {
+			files := fmt.Sprintf("train/%s/%d", l, i)
+			categ := Category{ID: i, LangCode: l}
+			categ.Words = categWords(files)
+			categs = append(categs, categ)
+
+			tf.AddDocs(strings.Join(categ.Words, " "))
+		}
+	}
+	for i := range categs {
+		categs[i].Weights = tf.Cal(strings.Join(categs[i].Words, " "))
+	}
+	//cosine
 	var input string
+	_ = input
 	all := len(articles)
+	println(all)
+	cnt := 0
 	for i, a := range articles {
+		_ = i
 		txt := a.Text
 		if len(txt) > 500 {
 			txt = txt[:500]
 		}
-		v := &Article{File: a.File, LangCode: a.LangCode, Desc: a.Desc, Domain: a.Domain, Text: txt, Href: a.Href}
+		v := &Article{File: a.File, Title: a.Title, LangCode: a.LangCode, Desc: a.Desc, Domain: a.Domain, Text: txt, Href: a.Href}
 		b, err := json.MarshalIndent(v, "", "  ")
 		if err != nil {
 			fmt.Println(err.Error())
 		}
+		_ = b
+		//println(string(b))
+		//println()
 
-		println(string(b))
-		println()
-		fmt.Print(i, all, ": Enter text: \n")
-		println(`
-// 0. Stop
-// 1. Society (включает Politics, Elections, Legislation, Incidents, Crime)
-// 2. Economy (включает Markets, Finance, Business)
-// 3. Technology (включает Gadgets, Auto, Apps, Internet services)
-// 4. Sports (включает E-Sports)
-// 5. Entertainment (включает Movies, Music, Games, Books, Arts)
-// 6. Science (включает Health, Biology, Physics, Genetics)
-// 7. Other (новостные статьи, не попавшие в перечисленные выше категории)
-// 8. Not news
-// 9. Skip
-`)
-		fmt.Scanln(&input)
-		fmt.Print(input)
-		if input == "0" {
-			break
+		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
+		w := tf.Cal(words)
+		maxsim := float64(0)
+		maxj := -1
+
+		for j := range categs {
+			sim := Cosine(w, categs[j].Weights)
+			if sim > float64(0.555) && sim > maxsim {
+				maxsim = sim
+				maxj = j
+			}
 		}
-		if input == "9" {
+		if maxj >= 0 {
+			//println("Current:", categs[maxj].ID, categs[maxj].LangCode)
+			cnt++
 			continue
 		}
-		s := fmt.Sprintf("train/%s/%s/%s", a.LangCode, input, a.Name)
-		copy(a.File, s)
+		/*
+					fmt.Print(i, all, ": Enter text: \n")
+					println(`
+			// 0. Stop
+			// 1. Society (включает Politics, Elections, Legislation, Incidents, Crime)
+			// 2. Economy (включает Markets, Finance, Business)
+			// 3. Technology (включает Gadgets, Auto, Apps, Internet services)
+			// 4. Sports (включает E-Sports)
+			// 5. Entertainment (включает Movies, Music, Games, Books, Arts)
+			// 6. Science (включает Health, Biology, Physics, Genetics)
+			// 7. Other (новостные статьи, не попавшие в перечисленные выше категории)
+			// 8. Not news
+			// 9. Skip
+			`)
+					fmt.Scanln(&input)
+					fmt.Print(input)
+					if input == "0" {
+						break
+					}
+					if input == "9" {
+						continue
+					}
+					s := fmt.Sprintf("train/%s/%s/%s", a.LangCode, input, a.Name)
+					copy(a.File, s)*/
 	}
+	println(cnt)
+}
+
+func categories(dir string, print bool) []Article {
+	articles := make([]Article, 0, 0)
+	t1 := time.Now()
+	err := pudge.Get("db/bylang", dir, &articles)
+	if err != nil || len(articles) == 0 {
+		articles = AByLang(dir)
+	}
+
+	articles = AByInfo(articles, false)
+	t2 := time.Now()
+
+	//cosine
+	tf := tfidf.New()
+	for _, a := range articles {
+		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
+		tf.AddDocs(words)
+	}
+	categs := make([]Category, 0)
+	langs := []string{"en", "ru"}
+	for _, l := range langs {
+		for i := 1; i < 8; i++ {
+			files := fmt.Sprintf("train/%s/%d", l, i)
+			categ := Category{ID: i, LangCode: l}
+			categ.Words = categWords(files)
+			//println(i, len(categ.Words))
+			categs = append(categs, categ)
+			tf.AddDocs(strings.Join(categ.Words, " "))
+		}
+	}
+	for i := range categs {
+		categs[i].Weights = tf.Cal(strings.Join(categs[i].Words, " "))
+	}
+	//cosine
+
+	cnt := 0
+	for i, a := range articles {
+		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
+		w := tf.Cal(words)
+		_ = w
+		maxsim := float64(0)
+		maxj := -1
+		articles[i].CategoryId = -1
+
+		N := len(categs)
+		sem := make(chan bool, N)
+		res := make(map[int]float64)
+		var mu sync.Mutex
+		for j, _ := range categs {
+			go func(a, b map[string]float64, c int) {
+				sim := Cosine(a, b)
+				mu.Lock()
+				res[c] = sim
+				mu.Unlock()
+				sem <- true
+			}(w, categs[j].Weights, j)
+			/*sim := Cosine(w, categs[j].Weights)
+			if sim > float64(0.555) && sim > maxsim {
+				maxsim = sim
+				maxj = j
+			}*/
+		}
+		for i := 0; i < N; i++ {
+			<-sem
+		}
+		for i := 0; i < N; i++ {
+			if res[i] > float64(0.555) && res[i] > maxsim {
+				maxsim = res[i]
+				maxj = i
+			}
+		}
+		if maxj >= 0 {
+			if maxj > 6 {
+				articles[i].CategoryId = maxj - 7
+			} else {
+				articles[i].CategoryId = maxj
+			}
+
+			//println("Current:", categs[maxj].ID, categs[maxj].LangCode)
+			cnt++
+			continue
+		}
+	}
+	t3 := time.Now()
+	if isDebug {
+		fmt.Printf("The %v took %v to run.  \n", t2.Sub(t1), t3.Sub(t2))
+	}
+
+	sort.Slice(articles, func(i, j int) bool {
+		return articles[i].CategoryId < articles[j].CategoryId
+	})
+	if print {
+		err = pudge.Set("db/bycateg", dir, articles)
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+
+		byCategs := make([]ByCategory, 7)
+		for i := 0; i < 7; i++ {
+			byCateg := ByCategory{}
+			switch i {
+			case 0:
+				byCateg.Category = "society"
+			case 1:
+				byCateg.Category = "economy"
+			case 2:
+				byCateg.Category = "technology"
+			case 3:
+				byCateg.Category = "sports"
+			case 4:
+				byCateg.Category = "entertainment"
+			case 5:
+				byCateg.Category = "science"
+			case 6:
+				byCateg.Category = "other"
+			}
+			byCateg.Articles = make([]string, 0)
+			byCategs[i] = byCateg
+		}
+		for _, a := range articles {
+			if a.CategoryId == -1 {
+				continue
+			}
+			byCategs[a.CategoryId].Articles = append(byCategs[a.CategoryId].Articles, a.Name)
+		}
+		b, err := json.MarshalIndent(byCategs, "", "  ")
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+
+		fmt.Println(string(b))
+	}
+	return articles
+}
+
+func Cosine(a, b map[string]float64) (sim float64) {
+	vec1, vec2 := vector(a, b)
+
+	var product, squareSumA, squareSumB float64
+	/*
+		N := len(vec1)
+		sem := make(chan bool, N)
+		for i, v := range vec1 {
+			go func(a, b float64) {
+				product += a * b
+				squareSumA += a * a
+				squareSumB += b * b
+				sem <- true
+			}(v, vec2[i])
+		}
+		for i := 0; i < N; i++ {
+			<-sem
+		}*/
+
+	for i, v := range vec1 {
+
+		product += v * vec2[i]
+		squareSumA += v * v
+		squareSumB += vec2[i] * vec2[i]
+	}
+
+	if squareSumA == 0 || squareSumB == 0 {
+		return 0
+	}
+
+	return normalize(product / (math.Sqrt(squareSumA) * math.Sqrt(squareSumB)))
+}
+
+func normalize(cos float64) float64 {
+	return 0.5 + 0.5*cos
+}
+
+func vector(a, b map[string]float64) (vec1, vec2 []float64) {
+	terms := make(map[string]interface{})
+	for term := range a {
+		terms[term] = nil
+	}
+	for term := range b {
+		terms[term] = nil
+	}
+
+	for term := range terms {
+		vec1 = append(vec1, a[term])
+		vec2 = append(vec2, b[term])
+	}
+
+	return
+}
+
+func threads(dir string) {
+	articles := make([]Article, 0, 0)
+
+	err := pudge.Get("db/bycateg", dir, &articles)
+	if err != nil || len(articles) == 0 {
+		articles = categories(dir, false)
+	}
+
+	ru0 := make([]Article, 0, 0)
+	for _, a := range articles {
+		if a.LangCode == "ru" && a.CategoryId == 0 {
+			ru0 = append(ru0, a)
+		}
+	}
+
+	//fmt.Println(string(b))
+	println("allo")
+	t1 := time.Now()
+	trained := traintf(ru0)
+	t2 := time.Now()
+	fmt.Printf("%v", t2.Sub(t1))
+	var cur Article
+	for i := 0; i < len(trained); i++ {
+		if i == 0 {
+			println(trained[0].Title)
+			cur = trained[0]
+			continue
+		}
+		sim := Cosine(cur.TFIDF, trained[i].TFIDF)
+		fmt.Printf("sim:%0.5f Tit:%s\n", sim, trained[i].Title)
+	}
+	t3 := time.Now()
+	fmt.Printf("%v", t3.Sub(t2))
+	//APrint(tra)
 }
