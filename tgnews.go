@@ -49,6 +49,11 @@ type ByThread struct {
 	Articles []string `json:"articles"`
 }
 
+type ByTop struct {
+	Category string     `json:"category"`
+	Threads  []ByThread `json:"threads"`
+}
+
 type Article struct {
 	File       string `json:"file"`
 	Name       string `json:",string"`
@@ -107,7 +112,9 @@ func main() {
 	case "categories":
 		categories(dir, true)
 	case "threads":
-		threads(dir)
+		threads(dir, true)
+	case "top":
+		toppairs(dir)
 	case "class":
 		class(dir)
 	}
@@ -335,7 +342,7 @@ func news(dir string) {
 		articles = AByLang(dir)
 	}
 	articles = AByInfo(articles, true)
-	APrint(ARu(articles))
+	//APrint(ARu(articles))
 	err = pudge.Set("db/bynews", dir, articles)
 	if err != nil {
 		println(err.Error())
@@ -348,12 +355,11 @@ func news(dir string) {
 	if err != nil {
 		fmt.Println(err.Error())
 	}
-	_ = b
-	//fmt.Println(string(b))
+	fmt.Println(string(b))
 
 	//clusters(ARu(articles))
-	tr := traintf(ARu(articles))
-	_ = tr
+	//tr := traintf(ARu(articles))
+	//_ = tr
 	/*
 		mapped := make(map[int]uint8)
 		k := 0
@@ -1039,6 +1045,27 @@ func class(dir string) {
 	println(cnt)
 }
 
+func initCategs(tf *tfidf.TFIDF) (categs []Category) {
+
+	langs := []string{"en", "ru"}
+	for _, l := range langs {
+		for i := 1; i < 8; i++ {
+			files := fmt.Sprintf("train/%s/%d", l, i)
+			categ := Category{ID: i, LangCode: l}
+			categ.LangCode = l
+
+			categ.Words = categWords(files)
+			//println(i, len(categ.Words))
+			categs = append(categs, categ)
+			tf.AddDocs(strings.Join(categ.Words, " "))
+		}
+	}
+	for i := range categs {
+		categs[i].Weights = tf.Cal(strings.Join(categs[i].Words, " "))
+	}
+	return
+}
+
 func categories(dir string, print bool) []Article {
 	articles := make([]Article, 0, 0)
 	t1 := time.Now()
@@ -1056,21 +1083,7 @@ func categories(dir string, print bool) []Article {
 		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
 		tf.AddDocs(words)
 	}
-	categs := make([]Category, 0)
-	langs := []string{"en", "ru"}
-	for _, l := range langs {
-		for i := 1; i < 8; i++ {
-			files := fmt.Sprintf("train/%s/%d", l, i)
-			categ := Category{ID: i, LangCode: l}
-			categ.Words = categWords(files)
-			//println(i, len(categ.Words))
-			categs = append(categs, categ)
-			tf.AddDocs(strings.Join(categ.Words, " "))
-		}
-	}
-	for i := range categs {
-		categs[i].Weights = tf.Cal(strings.Join(categs[i].Words, " "))
-	}
+	categs := initCategs(tf)
 	//cosine
 
 	cnt := 0
@@ -1227,7 +1240,7 @@ func vector(a, b map[string]float64) (vec1, vec2 []float64) {
 	return
 }
 
-func threads(dir string) {
+func threads(dir string, print bool) [][]Article {
 	articles := make([]Article, 0, 0)
 
 	err := pudge.Get("db/bycateg", dir, &articles)
@@ -1237,6 +1250,9 @@ func threads(dir string) {
 
 	chunks := make(map[string][]Article)
 	for _, a := range articles {
+		if a.CategoryId == -1 {
+			continue
+		}
 		key := fmt.Sprintf("%s%d", a.LangCode, a.CategoryId)
 		if _, ok := chunks[key]; !ok {
 			chunks[key] = make([]Article, 0)
@@ -1251,35 +1267,39 @@ func threads(dir string) {
 			allpairs = append(allpairs, p)
 		}
 	}
-	//fmt.Println(string(b))
-	byThreads := make([]ByThread, 0)
-	for _, p := range allpairs {
-		byThread := ByThread{}
-		byThread.Articles = make([]string, 0)
-		if len(p) > 0 {
-			byThread.Title = p[0].Title
-		}
-		for _, it := range p {
-			byThread.Articles = append(byThread.Articles, it.Name)
-		}
-		byThreads = append(byThreads, byThread)
-	}
-	b, err := json.MarshalIndent(byThreads, "", "  ")
-	if err != nil {
-		fmt.Println(err.Error())
-	}
+	if print {
 
-	fmt.Println(string(b))
+		byThreads := make([]ByThread, 0)
+		for _, p := range allpairs {
+			byThread := ByThread{}
+			byThread.Articles = make([]string, 0)
+			if len(p) > 0 {
+				byThread.Title = p[0].Title
+			}
+			for _, it := range p {
+				byThread.Articles = append(byThread.Articles, it.Name)
+			}
+			byThreads = append(byThreads, byThread)
+		}
+		b, err := json.MarshalIndent(byThreads, "", "  ")
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+
+		fmt.Println(string(b))
+	}
+	return allpairs
 	//fmt.Printf("pairs:%+v\n", allpairs)
 	//APrint(tra)
 }
 
-func pairs(in []Article) (allpairs [][]Article) {
+func pairs(in []Article) (sortedpairs [][]Article) {
 
 	trained := traintf(in)
 	tres := float64(0.777)
 	var cur Article
 	skiplist := make(map[int]bool)
+	allpairs := make([][]Article, 0)
 	for i := 0; i < len(trained); i++ {
 		cur = trained[i]
 		if _, ok := skiplist[i]; ok {
@@ -1307,5 +1327,148 @@ func pairs(in []Article) (allpairs [][]Article) {
 			allpairs = append(allpairs, pairs)
 		}
 	}
+	type forsort struct {
+		Article Article
+		Sim     float64
+	}
+	for _, pair := range allpairs {
+		tf := tfidf.New()
+		allwords := make([]string, 0)
+		for _, a := range pair {
+			words := bigwords(a.Title + " " + a.Desc + " " + a.Text + " " + a.SName)
+			tf.AddDocs(strings.Join(words, " "))
+			allwords = append(allwords, words...)
+		}
+		tf.AddDocs(strings.Join(allwords, " "))
+		allw := tf.Cal(strings.Join(allwords, " "))
+		forsorts := make([]forsort, 0)
+		for _, a := range pair {
+
+			words := bigwords(a.Title + " " + a.Desc + " " + a.Text + " " + a.SName)
+			curw := tf.Cal(strings.Join(words, " "))
+			sim := Cosine(allw, curw)
+			forsorts = append(forsorts, forsort{Article: a, Sim: sim})
+			//fmt.Printf("%s %s %.5f\n\n", a.Title, a.File, sim)
+		}
+		sort.Slice(forsorts, func(i, j int) bool {
+			return forsorts[i].Sim > forsorts[j].Sim
+		})
+		sortedpair := make([]Article, 0)
+		for _, f := range forsorts {
+			//fmt.Printf("%s  %.5f\n\n", f.Article.Title, f.Sim)
+			sortedpair = append(sortedpair, f.Article)
+		}
+		sortedpairs = append(sortedpairs, sortedpair)
+	}
+
 	return
+}
+
+func toppairs(dir string) {
+	allpairs := threads(dir, false)
+	type topPair struct {
+		Article Article
+		Sim     float64
+		Pair    []Article
+		CategID int
+	}
+	tf := tfidf.New()
+
+	tops := make([]topPair, 0)
+	for _, p := range allpairs {
+		top := topPair{Pair: p}
+		if len(p) > 0 {
+			top.Article = p[0]
+			top.CategID = p[0].CategoryId
+		}
+		a := p[0]
+		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
+		_ = words
+		//tf.AddDocs(words)
+		tops = append(tops, top)
+	}
+	categs := initCategs(tf)
+	//fmt.Printf("%d\n", len(categs))
+	for i, t := range tops {
+		//println(t.Article.LangCode, t.CategID, t.Article.Title)
+		idx := t.CategID
+		if t.Article.LangCode == "ru" {
+			idx += 7
+		}
+		a := t.Article
+		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
+		w := tf.Cal(words)
+		sim := Cosine(categs[idx].Weights, w)
+		tops[i].Sim = sim
+	}
+	sort.Slice(tops, func(i, j int) bool {
+		return tops[i].Sim > tops[j].Sim
+	})
+	bytops := make([]ByTop, 0)
+	bytop := ByTop{}
+	bytop.Category = "any"
+	bytop.Threads = make([]ByThread, 0)
+	for i, t := range tops {
+		if i > 9 {
+			break
+		}
+		byThread := ByThread{}
+		for _, a := range t.Pair {
+			byThread.Articles = append(byThread.Articles, a.Name)
+		}
+
+		byThread.Title = t.Article.Title
+		bytop.Threads = append(bytop.Threads, byThread)
+		//fmt.Printf("%s %0.5f\n\n", t.Article.Title, t.Sim)
+	}
+	bytops = append(bytops, bytop)
+
+	sort.Slice(tops, func(i, j int) bool {
+		return tops[i].CategID < tops[j].CategID
+	})
+
+	lastcateg := -1
+	//var byTop ByTop
+	for i, t := range tops {
+		if t.CategID != lastcateg {
+			if i != 0 {
+				bytops = append(bytops, bytop)
+			}
+			lastcateg = t.CategID
+			bytop = ByTop{}
+			switch lastcateg {
+			case 0:
+				bytop.Category = "society"
+			case 1:
+				bytop.Category = "economy"
+			case 2:
+				bytop.Category = "technology"
+			case 3:
+				bytop.Category = "sports"
+			case 4:
+				bytop.Category = "entertainment"
+			case 5:
+				bytop.Category = "science"
+			case 6:
+				bytop.Category = "other"
+			}
+			bytop.Threads = make([]ByThread, 0)
+		}
+		byThread := ByThread{}
+		for _, a := range t.Pair {
+			byThread.Articles = append(byThread.Articles, a.Name)
+		}
+
+		byThread.Title = t.Article.Title
+		bytop.Threads = append(bytop.Threads, byThread)
+		//fmt.Printf("%s %0.5f\n\n", t.Article.Title, t.Sim)
+	}
+	bytops = append(bytops, bytop)
+
+	b, err := json.MarshalIndent(bytops, "", "  ")
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	fmt.Println(string(b))
 }
