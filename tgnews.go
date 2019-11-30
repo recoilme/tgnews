@@ -23,11 +23,6 @@ import (
 )
 
 const (
-	/*
-		Good    bayesian.Class = "Good"
-		Bad     bayesian.Class = "Bad"
-		News    bayesian.Class = "News"
-		NotNews bayesian.Class = "NotNews"*/
 	isDebug = true
 )
 
@@ -337,18 +332,23 @@ func ARu(in []Article) (out []Article) {
 
 func news(dir string) {
 	articles := make([]Article, 0, 0)
-	err := pudge.Get("db/bylang", dir, &articles)
-	if err != nil || len(articles) == 0 {
-		articles = AByLang(dir)
-	}
-	articles = AByInfo(articles, true)
-	//APrint(ARu(articles))
-	err = pudge.Set("db/bynews", dir, articles)
-	if err != nil {
-		println(err.Error())
-	}
+	articles = categories(dir, false)
+	/*
+		err := pudge.Get("db/bylang", dir, &articles)
+		if err != nil || len(articles) == 0 {
+			articles = AByLang(dir)
+		}
+		articles = AByInfo(articles, true)
+		//APrint(ARu(articles))
+		err = pudge.Set("db/bynews", dir, articles)
+		if err != nil {
+			println(err.Error())
+		}*/
 	byNews := &ByNews{}
 	for _, a := range articles {
+		if a.CategoryId == -1 {
+			continue
+		}
 		byNews.Articles = append(byNews.Articles, a.Name)
 	}
 	b, err := json.MarshalIndent(byNews, "", "  ")
@@ -357,49 +357,6 @@ func news(dir string) {
 	}
 	fmt.Println(string(b))
 
-	//clusters(ARu(articles))
-	//tr := traintf(ARu(articles))
-	//_ = tr
-	/*
-		mapped := make(map[int]uint8)
-		k := 0
-		for i, a := range tr {
-			if _, ok := mapped[i]; ok {
-				continue
-			}
-			mapped[i] = 1
-			max := float64(0)
-			maxj := -1
-			maxart := a
-			for j, b := range tr {
-				if _, ok := mapped[j]; ok {
-					continue
-				}
-				sim := similarity.Cosine(a.TFIDF, b.TFIDF)
-				if sim > max {
-					max = sim
-					maxart = b
-					maxj = j
-				}
-			}
-			if max > float64(1.55) {
-				k++
-				mapped[maxj] = 1
-				println(k, a.Title, a.Domain)
-				println(k, maxart.Title, maxart.Domain)
-				//println("a.About")
-				//println(a.About)
-				//println("maxart.About")
-				//println(maxart.About)
-				fmt.Printf("similarity:%f\n", max)
-				println()
-			}
-			if i > 50 {
-				//break
-			}
-		}
-		//clusters(tr)
-	*/
 }
 
 func traintf(in []Article) []Article {
@@ -936,7 +893,7 @@ func categ(dir string) {
 func categWords(dir string) []string {
 	articles := make([]Article, 0, 0)
 	articles = AByLang(dir)
-	articles = AByInfo(articles, true)
+	articles = AByInfo(articles, false)
 	//APrint(ARu(articles))
 	res := make([]string, 0)
 	for _, a := range articles {
