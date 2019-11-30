@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	isDebug = true
+	isDebug = false
 )
 
 type ByLang struct {
@@ -84,6 +84,8 @@ type Category struct {
 
 //go run tgnews.go languages data/DataClusteringSample0107/20191101/00/
 //take at look at https://github.com/timdrijvers/recommendation
+
+// /Users/vadim/Downloads/Telegram\ Desktop/contest2225/20191122
 func main() {
 	//println()
 	//println("-- tgnews --")
@@ -103,8 +105,6 @@ func main() {
 		lang(dir)
 	case "news":
 		news(dir)
-	case "test":
-		test3(dir)
 	case "categories":
 		categories(dir, true)
 	case "threads":
@@ -122,54 +122,7 @@ func main() {
 	}
 }
 
-func test3(d string) {
-	rus := make([]string, 0, 0)
-	pudge.Get("db/lang", "rus", &rus)
-
-	_, _, _, _, text, _ := info(rus[0])
-	println(text)
-	f := tfidf.New()
-	_, _, _, _, text2, _ := info(rus[1])
-	f.AddDocs(text)
-	f.AddDocs(text2)
-	w1 := f.Cal(text)
-	printmap(w1)
-	fmt.Printf("weight of is %+v.\n", w1)
-}
-
-/*
-func test2(d string) {
-	f := tfidf.New()
-	f.AddDocs("how are you", "are you fine", "how old are you", "are you ok", "i am ok", "i am file")
-
-	t1 := "how is so cool"
-	w1 := f.Cal(t1)
-	fmt.Printf("weight of %s is %+v.\n", t1, w1)
-
-	t2 := "you are so beautiful"
-	w2 := f.Cal(t2)
-	fmt.Printf("weight of %s is %+v.\n", t2, w2)
-
-	sim := similarity.Cosine(w1, w2)
-	fmt.Printf("cosine between %s and %s is %f .\n", t1, t2, sim)
-	classifier := bayesian.NewClassifier(Good, Bad)
-	goodStuff := strings.Fields("во саду ли во огороде")
-	badStuff := strings.Fields("во первых во вторых")
-	classifier.Learn(goodStuff, Good)
-	classifier.Learn(badStuff, Bad)
-	//classifier.ConvertTermsFreqToTfIdf()
-	//classifier.WordsByClass3(Good)
-	res := classifier.WordsByClass(Good)
-	for i, s := range res {
-		fmt.Printf("%s %f\n", i, s)
-		//break
-	}
-	scores, likely, st := classifier.LogScores(
-		[]string{"ugly", "girl"})
-
-	println(scores, likely, st)
-}*/
-
+// AByInfo return parced articles
 func AByInfo(in []Article, onlyNews bool) (out []Article) {
 	for _, a := range in {
 		isNews := false
@@ -205,6 +158,7 @@ func AByInfo(in []Article, onlyNews bool) (out []Article) {
 	return out
 }
 
+// AByLang isolate ru and en articles
 func AByLang(dir string) []Article {
 	list, err := filePathWalkDir(dir)
 	if err != nil {
@@ -286,6 +240,7 @@ func lang(dir string) {
 	}
 }
 
+//APrint print articles
 func APrint(articles []Article) {
 
 	b, err := json.MarshalIndent(articles, "", "  ")
@@ -312,6 +267,7 @@ func copy(src string, dst string) {
 	checkErr(err)
 }
 
+//ARu filter by ru
 func ARu(in []Article) (out []Article) {
 	dom := make(map[string]byte)
 	for _, a := range in {
@@ -334,23 +290,17 @@ func ARu(in []Article) (out []Article) {
 func news(dir string) {
 	articles := make([]Article, 0, 0)
 	articles = categories(dir, false)
-	/*
-		err := pudge.Get("db/bylang", dir, &articles)
-		if err != nil || len(articles) == 0 {
-			articles = AByLang(dir)
-		}
-		articles = AByInfo(articles, true)
-		//APrint(ARu(articles))
-		err = pudge.Set("db/bynews", dir, articles)
-		if err != nil {
-			println(err.Error())
-		}*/
+
 	byNews := &ByNews{}
 	for _, a := range articles {
 		if a.CategoryId == -1 {
 			continue
 		}
-		byNews.Articles = append(byNews.Articles, a.Name)
+		name := a.Name
+		if isDebug {
+			name = a.Title
+		}
+		byNews.Articles = append(byNews.Articles, name)
 	}
 	b, err := json.MarshalIndent(byNews, "", "  ")
 	if err != nil {
@@ -378,159 +328,6 @@ func traintf(in []Article) []Article {
 
 	return in
 }
-
-/*
-func clusters(in []Article) {
-	data := make([]string, 0)
-	for _, a := range in {
-		data = append(data, a.About)
-	}
-	corp := makeCorpus(data)
-	docs := makeDocuments(data, corp, true)
-	r := rand.New(rand.NewSource(1337))
-	conf := Config{
-		K:          10,          // maximum 10 clusters expected
-		Vocabulary: len(corp),   // simple example: the vocab is the same as the corpus size
-		Iter:       1000,        // iterate 100 times
-		Alpha:      0.0001,      // smaller probability of joining an empty group
-		Beta:       0.1,         // higher probability of joining groups like me
-		Score:      Algorithm4,  // use Algorithm3 to score
-		Sampler:    NewGibbs(r), // use Gibbs to sample
-	}
-	var clustered []Cluster
-	var err error
-	if clustered, err = FindClusters(docs, conf); err != nil {
-		fmt.Println(err)
-	}
-	fmt.Println("Clusters (Algorithm4):")
-	for i, clust := range clustered {
-		fmt.Printf("\t%d: %q\n", clust.ID(), data[i])
-	}
-}
-*/
-/*
-func newsTmp(dir string) {
-	// en 18123	rus 16248 "news"
-	// en 12509 rus 13711 "news/"
-	articles := make([]Article, 0, 0)
-	eng := make([]string, 0)
-	rus := make([]string, 0)
-	for _, a := range articles {
-		if a.LangCode == "en" {
-			eng = append(eng, a.Name)
-		}
-		if a.LangCode == "ru" {
-			rus = append(rus, a.Name)
-		}
-	}
-	pudge.Get("db/bylang", "bylang", &articles)
-	domains := make(map[string]int, 0)
-	news := make([]string, 0)
-	cl := bayesian.NewClassifierTfIdf(News, NotNews)
-
-	lh := tfidf.New()
-	sv := tfidf.New()
-	all := tfidf.New()
-
-	baglh := make(map[string]float64)
-	bagsv := make(map[string]float64)
-	bagall := make(map[string]float64)
-	t1, t2 := "", ""
-	for _, f := range rus {
-		title, _, url, _, text, _ := info(f)
-		if strings.Contains(url, "news/") {
-			news = append(news, url)
-			//cl.Learn(bigwords(text), News)
-		} else {
-			//cl.Learn(bigwords(text), NotNews)
-		}
-		d, _ := domain(url)
-		domains[d] = domains[d] + 1
-		if d == "lifehacker.ru" {
-			if t1 == "" {
-				t1 = text
-			}
-			lh.AddDocs(text)
-			all.AddDocs(text)
-			for _, word := range bigwords(text) {
-				baglh[word]++
-				bagall[word]++
-			}
-			cl.Learn(bigwords(text), NotNews)
-			_ = title
-			//println(f, title, desc)
-		}
-		if d == "svpressa.ru" {
-			if t2 == "" {
-				t2 = text
-			}
-			for _, word := range bigwords(text) {
-				bagsv[word]++
-				bagall[word]++
-			}
-			sv.AddDocs(text)
-			all.AddDocs(text)
-			cl.Learn(bigwords(text), News)
-
-		}
-	}
-	cl.ConvertTermsFreqToTfIdf()
-	for dom, cnt := range domains {
-		println(dom, cnt)
-		break
-	}
-	for i, u := range news {
-		println(i, u)
-		break
-	}
-	tt := top(bagall, 500)
-	lhonly := make(map[string]float64)
-	for wor, val := range baglh {
-		if _, ok := bagsv[wor]; !ok {
-			lhonly[wor] = val
-		}
-	}
-	toplhon := top(lhonly, 50)
-	println("top:", toplhon)
-	println(tt)
-	tl := top(baglh, 50)
-	println("lh:", tl)
-	ts := top(bagsv, 50)
-	println("sv:", ts)
-	w1 := lh.Cal(tt)
-	//printmap(baglh)
-	println("lifehacker")
-	printmap(w1)
-	w2 := sv.Cal(tt)
-	println("svpressa")
-	//printmap(baglh)
-	printmap(w2)
-	//0.56560745836484893623 0.53073511349010293880
-	//0.56505354053652201429 0.52736314767274861115
-
-	//0.56469524156275596738 0.52792204154531274796
-	//0.53984176594954236261 0.58212331460708222064
-	wlh := lh.Cal(top(baglh, 10000))
-	wsv := sv.Cal(top(bagsv, 10000))
-	w3 := all.Cal(t1)
-	s1 := similarity.Cosine(w3, wlh)
-	s2 := similarity.Cosine(w3, wsv)
-	fmt.Printf("%.20f %.20f\n", s1, s2)
-	w4 := all.Cal(t2)
-	s3 := similarity.Cosine(w4, wlh)
-	s4 := similarity.Cosine(w4, wsv)
-	fmt.Printf("%.20f %.20f\n", s3, s4)
-	//res := cl.WordsByClass(News)
-	//m := cl.WordsByClass(News)
-	//printmap(m)
-	//println("not news")
-	//printmap(cl.WordsByClass(NotNews))
-	//news-r.ru 944
-	//runews24.ru 572
-	//dvnovosti.ru 200
-	//riasar.ru
-	//tengrinews.kz 421
-}*/
 
 func printmap(m map[string]float64) {
 	n := map[float64][]string{}
@@ -601,35 +398,6 @@ func filePathWalkDir(root string) ([]string, error) {
 		return nil
 	})
 	return files, err
-}
-
-func test(dir string) {
-	t := 199063389064
-	fmt.Printf("The t3 took %v to run.  \n", time.Duration(t))
-	title := ""
-	desc := ""
-	path := "data/DataClusteringSample0107/20191107/15/1061689992896686063.html"
-	f, _ := os.Open(path)
-	b1 := make([]byte, 120400)
-	_, err := f.Read(b1)
-	//println(string(b1), n1, err)
-	tit := bytes.Index(b1, []byte("title\" content=\""))
-	println(tit)
-	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(b1))
-	if err != nil {
-		println("err", err.Error())
-	}
-	doc.Find("meta").Each(func(i int, s *goquery.Selection) {
-		op, _ := s.Attr("property")
-		con, _ := s.Attr("content")
-		if op == "og:title" {
-			title = con
-		}
-		if op == "og:description" {
-			desc = con
-		}
-	})
-	println(title, desc)
 }
 
 func info(file string) (title, desc, url, name, text string, err error) {
@@ -787,109 +555,6 @@ func makeCorpus(a []string) map[string]int {
 	}
 	return retVal
 }
-
-/*
-func makeDocuments(a []string, c map[string]int, allowRepeat bool) []Document {
-	retVal := make([]Document, 0, len(a))
-	for _, s := range a {
-		var ts []int
-		for _, f := range strings.Fields(s) {
-			id := c[f]
-			ts = append(ts, id)
-		}
-		if !allowRepeat {
-			ts = set.Ints(ts) // this uniquifies the sentence
-		}
-		retVal = append(retVal, TokenSet(ts))
-	}
-	return retVal
-}
-
-func Example() {
-	corp := makeCorpus(data)
-	docs := makeDocuments(data, corp, false)
-	r := rand.New(rand.NewSource(1337))
-	conf := Config{
-		K:          10,          // maximum 10 clusters expected
-		Vocabulary: len(corp),   // simple example: the vocab is the same as the corpus size
-		Iter:       1000,        // iterate 100 times
-		Alpha:      0.0001,      // smaller probability of joining an empty group
-		Beta:       0.1,         // higher probability of joining groups like me
-		Score:      Algorithm3,  // use Algorithm3 to score
-		Sampler:    NewGibbs(r), // use Gibbs to sample
-	}
-	var clustered []Cluster
-	var err error
-	if clustered, err = FindClusters(docs, conf); err != nil {
-		fmt.Println(err)
-	}
-	fmt.Println("Clusters (Algorithm3):")
-	for i, clust := range clustered {
-		fmt.Printf("\t%d: %q\n", clust.ID(), data[i])
-	}
-
-	// Using Algorithm4, where repeat words are allowed
-	docs = makeDocuments(data, corp, true)
-	conf.Score = Algorithm4
-	if clustered, err = FindClusters(docs, conf); err != nil {
-		fmt.Println(err)
-	}
-
-	fmt.Println("\nClusters (Algorithm4):")
-	for i, clust := range clustered {
-		fmt.Printf("\t%d: %q\n", clust.ID(), data[i])
-	}
-}*/
-/*
-func categ(dir string) {
-	tech := categWords("clusters_ru/technology")
-	sports := categWords("clusters_ru/sports")
-	_ = tech
-	_ = sports
-	articles := make([]Article, 0, 0)
-	err := pudge.Get("db/bynews", dir, &articles)
-	if err != nil || len(articles) == 0 {
-
-		err := pudge.Get("db/bylang", dir, &articles)
-		if err != nil || len(articles) == 0 {
-			articles = AByLang(dir)
-		}
-		articles = AByInfo(articles, true)
-		//articles = AByLang(dir)
-	}
-	//APrint(ARu(articles))
-	articles = ARu(articles)
-	tf := tfidf.New()
-	tf.AddDocs(strings.Join(tech, " "))
-	tf.AddDocs(strings.Join(sports, " "))
-	for _, a := range articles {
-		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
-		tf.AddDocs(words)
-	}
-	techw := tf.Cal(strings.Join(tech, " "))
-	sportsw := tf.Cal(strings.Join(sports, " "))
-	for i, a := range articles {
-		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
-		w := tf.Cal(words)
-		articles[i].About = top(w, 100)
-		articles[i].TFIDF = w
-
-		simtech := similarity.Cosine(w, techw)
-		simsports := similarity.Cosine(w, sportsw)
-		if simtech > simsports {
-			//more tech
-			if simtech > float64(0.555) {
-				fmt.Printf("tech: %s %s %f\n", a.Domain, a.Title, simtech)
-			}
-		} else {
-			//more sports
-			if simsports > float64(0.555) {
-				fmt.Printf("sport: %s %s %f\n", a.Domain, a.Title, simsports)
-			}
-		}
-	}
-	println(len(articles))
-}*/
 
 func categWords(dir string) []string {
 	articles := make([]Article, 0, 0)
@@ -1134,7 +799,11 @@ func categories(dir string, print bool) []Article {
 			if a.CategoryId == -1 {
 				continue
 			}
-			byCategs[a.CategoryId].Articles = append(byCategs[a.CategoryId].Articles, a.Name)
+			name := a.Name
+			if isDebug {
+				name = a.Title
+			}
+			byCategs[a.CategoryId].Articles = append(byCategs[a.CategoryId].Articles, name)
 		}
 		b, err := json.MarshalIndent(byCategs, "", "  ")
 		if err != nil {
@@ -1146,6 +815,7 @@ func categories(dir string, print bool) []Article {
 	return articles
 }
 
+//Cosine return cosine similarity
 func Cosine(a, b map[string]float64) (sim float64) {
 	vec1, vec2 := vector(a, b)
 
@@ -1237,7 +907,11 @@ func threads(dir string, print bool) [][]Article {
 				byThread.Title = p[0].Title
 			}
 			for _, it := range p {
-				byThread.Articles = append(byThread.Articles, it.Name)
+				name := it.Name
+				if isDebug {
+					name = it.Title
+				}
+				byThread.Articles = append(byThread.Articles, name)
 			}
 			byThreads = append(byThreads, byThread)
 		}
