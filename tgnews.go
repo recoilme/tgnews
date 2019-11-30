@@ -83,6 +83,7 @@ type Category struct {
 //Other (новостные статьи, не попавшие в перечисленные выше категории)
 
 //go run tgnews.go languages data/DataClusteringSample0107/20191101/00/
+//take at look at https://github.com/timdrijvers/recommendation
 func main() {
 	//println()
 	//println("-- tgnews --")
@@ -110,7 +111,7 @@ func main() {
 		threads(dir, true)
 	case "top":
 		toppairs(dir)
-	case "class":
+	case "train":
 		class(dir)
 	}
 	t2 := time.Now()
@@ -938,7 +939,6 @@ func class(dir string) {
 	}
 	//cosine
 	var input string
-	_ = input
 	all := len(articles)
 	println(all)
 	cnt := 0
@@ -974,9 +974,9 @@ func class(dir string) {
 			cnt++
 			continue
 		}
-		/*
-					fmt.Print(i, all, ": Enter text: \n")
-					println(`
+
+		fmt.Print(i, all, ": Enter text: \n")
+		println(`
 			// 0. Stop
 			// 1. Society (включает Politics, Elections, Legislation, Incidents, Crime)
 			// 2. Economy (включает Markets, Finance, Business)
@@ -988,16 +988,19 @@ func class(dir string) {
 			// 8. Not news
 			// 9. Skip
 			`)
-					fmt.Scanln(&input)
-					fmt.Print(input)
-					if input == "0" {
-						break
-					}
-					if input == "9" {
-						continue
-					}
-					s := fmt.Sprintf("train/%s/%s/%s", a.LangCode, input, a.Name)
-					copy(a.File, s)*/
+		fmt.Scanln(&input)
+		fmt.Print(input)
+		if input == "0" {
+			break
+		}
+		if input == "9" {
+			continue
+		}
+		if input == "" {
+			continue
+		}
+		s := fmt.Sprintf("train/%s/%s/%s", a.LangCode, input, a.Name)
+		copy(a.File, s)
 	}
 	println(cnt)
 }
