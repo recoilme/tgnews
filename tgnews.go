@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -18,12 +19,11 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/abadojack/whatlanggo"
-	"github.com/recoilme/pudge"
-	"github.com/wilcosheh/tfidf"
+	"github.com/recoilme/tfidf"
 )
 
 const (
-	isDebug = false
+	isDebug = true
 )
 
 type ByLang struct {
@@ -63,6 +63,7 @@ type Article struct {
 	About      string
 	TFIDF      map[string]float64
 	CategoryId int
+	Words      string
 }
 
 type Category struct {
@@ -89,6 +90,7 @@ type Category struct {
 func main() {
 	//println()
 	//println("-- tgnews --")
+	runtime.GOMAXPROCS(runtime.NumCPU())
 	args := os.Args
 	cmd := "languages"
 	dir := "data"
@@ -124,12 +126,17 @@ func main() {
 
 // AByInfo return parced articles
 func AByInfo(in []Article, onlyNews bool) (out []Article) {
-	for _, a := range in {
+	var wg sync.WaitGroup
+	parser := func(a Article) {
+		defer wg.Done()
 		isNews := false
 		title, desc, url, sname, text, err := info(a.File)
 		if err != nil {
-			//panic(err)
-			continue
+			return
+		}
+		d, errDom := domain(url)
+		if errDom == nil {
+			a.Domain = d
 		}
 		if strings.Contains(url, "news/") {
 			isNews = true
@@ -137,15 +144,13 @@ func AByInfo(in []Article, onlyNews bool) (out []Article) {
 		if strings.Contains(sname, "news") {
 			isNews = true
 		}
-		d, errDom := domain(url)
-		if errDom == nil {
-			a.Domain = d
-		}
+
 		if strings.Contains(d, "news") {
 			isNews = true
 		}
+
 		if !isNews && onlyNews {
-			continue
+			return
 		}
 		a.Title = title
 		a.Desc = desc
@@ -153,11 +158,23 @@ func AByInfo(in []Article, onlyNews bool) (out []Article) {
 		a.SName = sname
 		a.Text = text
 		a.IsNews = isNews
+		a.Words = strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
 		out = append(out, a)
 	}
+	i := 0
+	for _, a := range in {
+		wg.Add(1)
+		i++
+		go parser(a)
+		if i%500 == 0 {
+			wg.Wait()
+		}
+	}
+	wg.Wait()
 	return out
 }
 
+/*
 // AByLang isolate ru and en articles
 func AByLang(dir string) []Article {
 	list, err := filePathWalkDir(dir)
@@ -202,6 +219,66 @@ func AByLang(dir string) []Article {
 		//break
 	}
 	return articles
+}*/
+
+// AByLang isolate ru and en articles
+func AByLang(dir string) []Article {
+	list, err := filePathWalkDir(dir)
+	if err != nil {
+		panic(err)
+	}
+	//println("files:", len(list))
+	articles := make([]Article, 0, 0)
+	/*
+		options := whatlanggo.Options{
+			Whitelist: map[whatlanggo.Lang]bool{
+				whatlanggo.Eng: true,
+				whatlanggo.Rus: true,
+			},
+		}
+	*/
+	//articles = append(articles, Article{Name: filepath.Base(f), File: f, LangCode: "en"})
+	//out := make(chan Article, 10)
+	var wg sync.WaitGroup
+	detector := func(f string) {
+		defer wg.Done()
+		title, desc, text, err := header(f)
+		if err != nil || title == "" {
+			return
+		}
+
+		info := whatlanggo.DetectLang(title + " " + desc + " " + text)
+		lang := info.String()
+		if lang == "Russian" {
+			if strings.ContainsAny(title+desc, "ії") {
+				lang = "ua"
+			}
+		}
+		switch lang {
+		case "English":
+			articles = append(articles, Article{Name: filepath.Base(f), File: f, LangCode: "en"})
+			return
+		case "Russian":
+			articles = append(articles, Article{Name: filepath.Base(f), File: f, LangCode: "ru"})
+			return
+		default:
+
+		}
+		return
+	}
+	cnt := 0
+	for _, f := range list {
+		cnt++
+		wg.Add(1)
+		go detector(f)
+		if cnt%500 == 0 {
+			wg.Wait()
+		}
+	}
+	wg.Wait()
+	//println(len(articles))
+
+	return articles
 }
 
 func lang(dir string) {
@@ -232,12 +309,12 @@ func lang(dir string) {
 	fmt.Println(string(json))
 	//bylang[0].LangCode = "en"
 
-	pudge.DeleteFile("db/bylang")
+	//pudge.DeleteFile("db/bylang")
 
-	err = pudge.Set("db/bylang", dir, articles)
-	if err != nil {
-		println(err.Error())
-	}
+	//err = pudge.Set("db/bylang", dir, articles)
+	//if err != nil {
+	//	println(err.Error())
+	//}
 }
 
 //APrint print articles
@@ -313,12 +390,12 @@ func news(dir string) {
 func traintf(in []Article) []Article {
 	tf := tfidf.New()
 	for _, a := range in {
-		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
-		tf.AddDocs(words)
+		//words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
+		tf.AddDocs(a.Words)
 	}
 	for i, a := range in {
-		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
-		w := tf.Cal(words)
+		//words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
+		w := tf.Cal(a.Words)
 		//	println(a.Title)
 		in[i].About = top(w, 100)
 		in[i].TFIDF = w
@@ -570,22 +647,23 @@ func categWords(dir string) []string {
 
 func class(dir string) {
 	articles := make([]Article, 0, 0)
-	err := pudge.Get("db/bynews", dir, &articles)
-	if err != nil || len(articles) == 0 {
-
-		err := pudge.Get("db/bylang", dir, &articles)
+	/*
+		err := pudge.Get("db/bynews", dir, &articles)
 		if err != nil || len(articles) == 0 {
-			articles = AByLang(dir)
-		}
-		articles = AByInfo(articles, false)
-		//articles = AByLang(dir)
-	}
 
+			err := pudge.Get("db/bylang", dir, &articles)
+			if err != nil || len(articles) == 0 {
+				articles = AByLang(dir)
+			}
+			articles = AByInfo(articles, false)
+			//articles = AByLang(dir)
+		}
+	*/
 	//cosine
 	tf := tfidf.New()
 	for _, a := range articles {
-		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
-		tf.AddDocs(words)
+		//words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
+		tf.AddDocs(a.Words)
 	}
 	categs := make([]Category, 0)
 	langs := []string{"en", "ru"}
@@ -622,8 +700,8 @@ func class(dir string) {
 		//println(string(b))
 		//println()
 
-		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
-		w := tf.Cal(words)
+		//words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
+		w := tf.Cal(a.Words)
 		maxsim := float64(0)
 		maxj := -1
 
@@ -692,29 +770,31 @@ func initCategs(tf *tfidf.TFIDF) (categs []Category) {
 }
 
 func categories(dir string, print bool) []Article {
-	articles := make([]Article, 0, 0)
-	t1 := time.Now()
-	err := pudge.Get("db/bylang", dir, &articles)
-	if err != nil || len(articles) == 0 {
-		articles = AByLang(dir)
-	}
+	//articles := make([]Article, 0, 0)
+	//t1 := time.Now()
+	//err := pudge.Get("db/bylang", dir, &articles)
+	//if err != nil || len(articles) == 0 {
+
+	articles := AByLang(dir)
+	//println(len(articles))
+	//}
 
 	articles = AByInfo(articles, false)
-	t2 := time.Now()
+	//t2 := time.Now()
 
 	//cosine
 	tf := tfidf.New()
 	for _, a := range articles {
-		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
-		tf.AddDocs(words)
+		//words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
+		tf.AddDocs(a.Words)
 	}
 	categs := initCategs(tf)
 	//cosine
 
 	cnt := 0
 	for i, a := range articles {
-		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
-		w := tf.Cal(words)
+		//words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
+		w := tf.Cal(a.Words)
 		_ = w
 		maxsim := float64(0)
 		maxj := -1
@@ -725,6 +805,10 @@ func categories(dir string, print bool) []Article {
 		res := make(map[int]float64)
 		var mu sync.Mutex
 		for j, _ := range categs {
+			if categs[j].LangCode != a.LangCode {
+				sem <- true
+				continue
+			}
 			go func(a, b map[string]float64, c int) {
 				sim := Cosine(a, b)
 				mu.Lock()
@@ -759,19 +843,19 @@ func categories(dir string, print bool) []Article {
 			continue
 		}
 	}
-	t3 := time.Now()
+	//t3 := time.Now()
 	if isDebug {
-		fmt.Printf("The %v took %v to run.  \n", t2.Sub(t1), t3.Sub(t2))
+		//fmt.Printf("The %v took %v to run.  \n", t2.Sub(t1), t3.Sub(t2))
 	}
 
 	sort.Slice(articles, func(i, j int) bool {
 		return articles[i].CategoryId < articles[j].CategoryId
 	})
 	if print {
-		err = pudge.Set("db/bycateg", dir, articles)
-		if err != nil {
-			fmt.Println(err.Error())
-		}
+		//err = pudge.Set("db/bycateg", dir, articles)
+		//if err != nil {
+		//	fmt.Println(err.Error())
+		//}
 
 		byCategs := make([]ByCategory, 7)
 		for i := 0; i < 7; i++ {
@@ -853,7 +937,7 @@ func normalize(cos float64) float64 {
 	return 0.5 + 0.5*cos
 }
 
-func vector(a, b map[string]float64) (vec1, vec2 []float64) {
+func vector(a, b map[string]float64) ([]float64, []float64) {
 	terms := make(map[string]interface{})
 	for term := range a {
 		terms[term] = nil
@@ -861,22 +945,49 @@ func vector(a, b map[string]float64) (vec1, vec2 []float64) {
 	for term := range b {
 		terms[term] = nil
 	}
+	lenterm := len(terms)
 
+	vec1 := make([]float64, 0, lenterm)
+	vec2 := make([]float64, 0, lenterm)
 	for term := range terms {
 		vec1 = append(vec1, a[term])
 		vec2 = append(vec2, b[term])
 	}
 
-	return
+	return vec1, vec2
 }
 
+/*
+func vector(a, b map[string]float64) ([]float64, []float64) {
+	terms := make(map[string]interface{})
+	for term := range a {
+		terms[term] = nil
+	}
+	for term := range b {
+		terms[term] = nil
+	}
+	lenterm := len(terms)
+
+	vec1 := make([]float64, lenterm)
+	vec2 := make([]float64, lenterm)
+	i := 0
+	for term := range terms {
+		vec1[i] = a[term]
+		vec2[i] = a[term]
+		//vec2 = append(vec2, b[term])
+		i++
+	}
+
+	return vec1,vec2
+}
+*/
 func threads(dir string, print bool) [][]Article {
 	articles := make([]Article, 0, 0)
 
-	err := pudge.Get("db/bycateg", dir, &articles)
-	if err != nil || len(articles) == 0 {
-		articles = categories(dir, false)
-	}
+	//err := pudge.Get("db/bycateg", dir, &articles)
+	//if err != nil || len(articles) == 0 {
+	articles = categories(dir, false)
+	//}
 
 	chunks := make(map[string][]Article)
 	for _, a := range articles {
@@ -978,8 +1089,8 @@ func pairs(in []Article) (sortedpairs [][]Article) {
 		forsorts := make([]forsort, 0)
 		for _, a := range pair {
 
-			words := bigwords(a.Title + " " + a.Desc + " " + a.Text + " " + a.SName)
-			curw := tf.Cal(strings.Join(words, " "))
+			//words := bigwords(a.Title + " " + a.Desc + " " + a.Text + " " + a.SName)
+			curw := tf.Cal(a.Words) //strings.Join(words, " "))
 			sim := Cosine(allw, curw)
 			forsorts = append(forsorts, forsort{Article: a, Sim: sim})
 			//fmt.Printf("%s %s %.5f\n\n", a.Title, a.File, sim)
@@ -1015,9 +1126,9 @@ func toppairs(dir string) {
 			top.Article = p[0]
 			top.CategID = p[0].CategoryId
 		}
-		a := p[0]
-		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
-		_ = words
+		//a := p[0]
+		//words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
+		//_ = words
 		//tf.AddDocs(words)
 		tops = append(tops, top)
 	}
@@ -1030,8 +1141,8 @@ func toppairs(dir string) {
 			idx += 7
 		}
 		a := t.Article
-		words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
-		w := tf.Cal(words)
+		//words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
+		w := tf.Cal(a.Words)
 		sim := Cosine(categs[idx].Weights, w)
 		tops[i].Sim = sim
 	}
