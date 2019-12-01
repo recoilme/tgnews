@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	isDebug = true
+	isDebug = false
 )
 
 type ByLang struct {
