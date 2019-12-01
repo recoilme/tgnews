@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -19,13 +21,29 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/abadojack/whatlanggo"
-	"github.com/recoilme/tfidf"
 )
 
 const (
 	isDebug = false
 )
 
+type Tokenizer interface {
+	Seg(text string) []string
+	Free()
+}
+
+type EnTokenizer struct {
+}
+
+// TFIDF tfidf model
+type TFIDF struct {
+	docIndex  map[string]int         // train document index in TermFreqs
+	termFreqs []map[string]int       // term frequency for each train document
+	termDocs  map[string]int         // documents number for each term in train data
+	n         int                    // number of documents in train data
+	stopWords map[string]interface{} // words to be filtered
+	tokenizer Tokenizer              // tokenizer, space is used as default
+}
 type ByLang struct {
 	LangCode string   `json:"lang_code"`
 	Articles []string `json:"articles"`
@@ -388,7 +406,7 @@ func news(dir string) {
 }
 
 func traintf(in []Article) []Article {
-	tf := tfidf.New()
+	tf := NewTFIDF()
 	for _, a := range in {
 		//words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
 		tf.AddDocs(a.Words)
@@ -660,7 +678,7 @@ func class(dir string) {
 		}
 	*/
 	//cosine
-	tf := tfidf.New()
+	tf := NewTFIDF()
 	for _, a := range articles {
 		//words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
 		tf.AddDocs(a.Words)
@@ -748,7 +766,7 @@ func class(dir string) {
 	println(cnt)
 }
 
-func initCategs(tf *tfidf.TFIDF) (categs []Category) {
+func initCategs(tf *TFIDF) (categs []Category) {
 
 	langs := []string{"en", "ru"}
 	for _, l := range langs {
@@ -783,7 +801,7 @@ func categories(dir string, print bool) []Article {
 	//t2 := time.Now()
 
 	//cosine
-	tf := tfidf.New()
+	tf := NewTFIDF()
 	for _, a := range articles {
 		//words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
 		tf.AddDocs(a.Words)
@@ -1077,7 +1095,7 @@ func pairs(in []Article) (sortedpairs [][]Article) {
 		Sim     float64
 	}
 	for _, pair := range allpairs {
-		tf := tfidf.New()
+		tf := NewTFIDF()
 		allwords := make([]string, 0)
 		for _, a := range pair {
 			words := bigwords(a.Title + " " + a.Desc + " " + a.Text + " " + a.SName)
@@ -1117,7 +1135,7 @@ func toppairs(dir string) {
 		Pair    []Article
 		CategID int
 	}
-	tf := tfidf.New()
+	tf := NewTFIDF()
 
 	tops := make([]topPair, 0)
 	for _, p := range allpairs {
@@ -1216,4 +1234,125 @@ func toppairs(dir string) {
 	}
 
 	fmt.Println(string(b))
+}
+
+// New new model with default
+func NewTFIDF() *TFIDF {
+	return &TFIDF{
+		docIndex:  make(map[string]int),
+		termFreqs: make([]map[string]int, 0),
+		termDocs:  make(map[string]int),
+		n:         0,
+		tokenizer: &EnTokenizer{},
+	}
+}
+
+// NewTokenizer new with specified tokenizer
+func NewTokenizer(tokenizer Tokenizer) *TFIDF {
+	return &TFIDF{
+		docIndex:  make(map[string]int),
+		termFreqs: make([]map[string]int, 0),
+		termDocs:  make(map[string]int),
+		n:         0,
+		tokenizer: tokenizer,
+	}
+}
+
+// AddDocs add train documents
+func (f *TFIDF) AddDocs(docs ...string) {
+	for _, doc := range docs {
+		h := hash(doc)
+		if f.docHashPos(h) >= 0 {
+			return
+		}
+
+		termFreq := f.termFreq(doc)
+		if len(termFreq) == 0 {
+			return
+		}
+
+		f.docIndex[h] = f.n
+		f.n++
+
+		f.termFreqs = append(f.termFreqs, termFreq)
+
+		for term := range termFreq {
+			f.termDocs[term]++
+		}
+	}
+}
+
+// Cal calculate tf-idf weight for specified document
+func (f *TFIDF) Cal(doc string) (weight map[string]float64) {
+	weight = make(map[string]float64)
+
+	var termFreq map[string]int
+
+	docPos := f.docPos(doc)
+	if docPos < 0 {
+		termFreq = f.termFreq(doc)
+	} else {
+		termFreq = f.termFreqs[docPos]
+	}
+
+	docTerms := 0
+	for _, freq := range termFreq {
+		docTerms += freq
+	}
+	for term, freq := range termFreq {
+		weight[term] = tfidf(freq, docTerms, f.termDocs[term], f.n)
+	}
+
+	return weight
+}
+
+func (f *TFIDF) termFreq(doc string) (m map[string]int) {
+	m = make(map[string]int)
+
+	tokens := f.tokenizer.Seg(doc)
+	if len(tokens) == 0 {
+		return
+	}
+
+	for _, term := range tokens {
+		//if _, ok := f.stopWords[term]; ok {
+		//	continue
+		//}
+
+		m[term]++
+	}
+
+	return
+}
+
+func (f *TFIDF) docHashPos(hash string) int {
+	if pos, ok := f.docIndex[hash]; ok {
+		return pos
+	}
+
+	return -1
+}
+
+func (f *TFIDF) docPos(doc string) int {
+	return f.docHashPos(hash(doc))
+}
+
+func hash(text string) string {
+	h := md5.New()
+	h.Write([]byte(text))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func tfidf(termFreq, docTerms, termDocs, N int) float64 {
+	tf := float64(termFreq) / float64(docTerms)
+	idf := math.Log(float64(1+N) / (1 + float64(termDocs)))
+	return tf * idf
+}
+
+func (s *EnTokenizer) Seg(text string) []string {
+	return strings.Fields(text)
+}
+
+func (s *EnTokenizer) Free() {
+
 }
