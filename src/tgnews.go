@@ -740,6 +740,7 @@ func train(dir, dirtrain string) {
 			continue
 		}
 		if input == "" {
+			input = "9"
 			continue
 		}
 		s := fmt.Sprintf("train/%s/%s/%s", a.LangCode, input, a.Name)

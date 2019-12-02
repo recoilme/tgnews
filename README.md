@@ -40,11 +40,12 @@ tgnews top source_dir
 
 ## Performance
 
-Perfomance is not good (around 1000 docs/min). Wait for optimisations. Take a look at `gonum` and `sparse matrix`
+Perfomance is not good (around 300 docs/sec). Wait for optimisations. Take a look at `gonum` and `sparse matrix`
 
 
 ## How it is done
 
+* Put articles to train folders by categories manualy or via comand line interface (go run tgnews.go data/folder)
 * Get articles by categories from train folders
 * Calculate TF/IDF
 * Calculate cosine similarity with catgory/article
