@@ -112,11 +112,15 @@ func main() {
 	args := os.Args
 	cmd := "languages"
 	dir := "data"
+	dirtrain := "train"
 	if len(args) >= 2 {
 		cmd = args[1]
 	}
 	if len(args) >= 3 {
 		dir = args[2]
+	}
+	if len(args) >= 4 {
+		dirtrain = args[3]
 	}
 	//println("cmd:", cmd, "dir:", dir)
 	t1 := time.Now()
@@ -132,7 +136,7 @@ func main() {
 	case "top":
 		toppairs(dir)
 	case "train":
-		class(dir)
+		train(dir, dirtrain)
 	}
 	t2 := time.Now()
 	dur := t2.Sub(t1)
@@ -663,41 +667,19 @@ func categWords(dir string) []string {
 	return res
 }
 
-func class(dir string) {
-	articles := make([]Article, 0, 0)
-	/*
-		err := pudge.Get("db/bynews", dir, &articles)
-		if err != nil || len(articles) == 0 {
+func train(dir, dirtrain string) {
+	articles := AByLang(dir)
 
-			err := pudge.Get("db/bylang", dir, &articles)
-			if err != nil || len(articles) == 0 {
-				articles = AByLang(dir)
-			}
-			articles = AByInfo(articles, false)
-			//articles = AByLang(dir)
-		}
-	*/
+	articles = AByInfo(articles, false)
+	//t2 := time.Now()
+
 	//cosine
 	tf := NewTFIDF()
 	for _, a := range articles {
 		//words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
 		tf.AddDocs(a.Words)
 	}
-	categs := make([]Category, 0)
-	langs := []string{"en", "ru"}
-	for _, l := range langs {
-		for i := 1; i < 8; i++ {
-			files := fmt.Sprintf("train/%s/%d", l, i)
-			categ := Category{ID: i, LangCode: l}
-			categ.Words = categWords(files)
-			categs = append(categs, categ)
-
-			tf.AddDocs(strings.Join(categ.Words, " "))
-		}
-	}
-	for i := range categs {
-		categs[i].Weights = tf.Cal(strings.Join(categs[i].Words, " "))
-	}
+	categs := initCategs(tf)
 	//cosine
 	var input string
 	all := len(articles)
@@ -715,8 +697,8 @@ func class(dir string) {
 			fmt.Println(err.Error())
 		}
 		_ = b
-		//println(string(b))
-		//println()
+		println(string(b))
+		println()
 
 		//words := strings.Join(bigwords(a.Title+" "+a.Desc+" "+a.Text+" "+a.SName), " ")
 		w := tf.Cal(a.Words)
